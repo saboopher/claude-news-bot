@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from xml.etree import ElementTree
 
-import feedparser
 import httpx
 from bs4 import BeautifulSoup
 
@@ -52,11 +52,25 @@ async def fetch_rss() -> list[Article]:
         async with httpx.AsyncClient(timeout=20) as client:
             resp = await client.get(NEWS_SOURCES["anthropic_rss"])
             resp.raise_for_status()
-        feed = feedparser.parse(resp.text)
-        for entry in feed.entries:
-            title = entry.get("title", "")
-            link = entry.get("link", "")
-            desc = entry.get("summary", entry.get("description", ""))
+        root = ElementTree.fromstring(resp.text)
+        # Handle both RSS and Atom namespaces
+        ns = {"atom": "http://www.w3.org/2005/Atom"}
+        items = root.findall(".//item") or root.findall(".//atom:entry", ns)
+        for item in items:
+            title = (
+                item.findtext("title")
+                or item.findtext("atom:title", namespaces=ns)
+                or ""
+            )
+            link = item.findtext("link") or ""
+            if not link:
+                link_el = item.find("atom:link", ns)
+                link = link_el.get("href", "") if link_el is not None else ""
+            desc = (
+                item.findtext("description")
+                or item.findtext("atom:summary", namespaces=ns)
+                or ""
+            )
             if _is_claude_related(f"{title} {desc}"):
                 articles.append(
                     Article(
